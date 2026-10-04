@@ -1,8 +1,10 @@
 import asyncio
-from httpx import Timeout
 from collections.abc import Callable, Awaitable
-
+from django.conf import settings
+from django.urls import reverse
+from httpx import Timeout
 from tenacity import AsyncRetrying, stop_after_attempt, wait_exponential_jitter, retry_if_exception_type
+from urllib.parse import urljoin
 
 from core.domain.tenacity_utils import RetryConfig
 from core.integrations.fragment.errors import (
@@ -12,6 +14,10 @@ from core.integrations.fragment.errors import (
 )
 from core.integrations.paypear.errors import PayPearAPINetworkError
 from core.integrations.platega.errors import PlategaAPINetworkError
+
+
+def build_site_url(view_name: str) -> str:
+    return urljoin(settings.SITE_DOMAIN, reverse(view_name))  # pyright: ignore[reportAny]
 
 
 def create_new_timeout_conf_or_use_default(timeout: float | None, connect: float | None, default: Timeout) -> Timeout:

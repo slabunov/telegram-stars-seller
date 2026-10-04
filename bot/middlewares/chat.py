@@ -1,17 +1,13 @@
 import logging
-from typing import overload
-
 from dishka import FromDishka
-
+from django.conf import settings
 from telegram import Update, ChatMemberUpdated, Chat, ChatMember
 from telegram.ext import ApplicationHandlerStop, ContextTypes
+from typing import overload
 
-from django.conf import settings
-
+from core.ioc import inject
 from core.repositories.utils import db_action_with_tenacity
 from core.services.user import UserService
-from core.ioc import inject
-
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +31,7 @@ async def enforce_private_chats_only_or_admin_chat(update: object, _: ContextTyp
             raise ApplicationHandlerStop()
 
     chat_id = chat.id
-    if chat_id != settings.ADMIN_CHAT_ID and chat_id != settings.CHANNEL_ID:  # pyright: ignore[reportAny]
+    if chat_id != settings.TELEGRAM_ADMIN_CHAT_ID and chat_id != settings.TELEGRAM_CHANNEL_ID:  # pyright: ignore[reportAny]
         try:
             logger.info(f"Обнаружен несанкционированный чат {chat.title} ({chat_id}). Попытка выхода...")
             if await chat.leave():

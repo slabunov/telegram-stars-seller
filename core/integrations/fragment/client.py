@@ -1,15 +1,12 @@
 import asyncio
 import httpx
 import logging
-from decimal import Decimal
-from uuid import UUID, uuid4
-from urllib.parse import urljoin, urlencode
-from typing import final, cast
 from collections.abc import Mapping
-
-from django.urls import reverse
-
+from decimal import Decimal
 from django.conf import settings
+from typing import final, cast
+from urllib.parse import urljoin, urlencode
+from uuid import UUID, uuid4
 
 from core.domain.network_utils import SAFE_TO_RETRY
 from core.integrations.fragment.errors import (
@@ -17,7 +14,8 @@ from core.integrations.fragment.errors import (
     FragmentAPINetworkError,
     FragmentAPINotEnoughBalanceError,
     FragmentAPITooManyRequests,
-    FragmentAPITemporaryError
+    FragmentAPITemporaryError,
+    FragmentAPIUnknownResultError
 )
 from core.integrations.fragment.schemas import (
     BalanceForCurrencyJSON, BalanceResponse,
@@ -25,9 +23,8 @@ from core.integrations.fragment.schemas import (
     SendStarsResponse, StarsJSON
 )
 from core.integrations.fragment.utils import parse_retry_after
-from core.integrations.utils import create_new_timeout_conf_or_use_default
+from core.integrations.utils import build_site_url, create_new_timeout_conf_or_use_default
 from core.services.fragment_transaction import FragmentTransactionService
-
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +48,7 @@ class FragmentClient:
         self.url = cast(str, getattr(settings, "FRAGMENT_API_URL", None))  # noqa
         self.currency = cast(str, getattr(settings, "FRAGMENT_CURRENCY", None))  # noqa
         self.webhook_secret = cast(str, getattr(settings, "FRAGMENT_WEBHOOK_SECRET", None))  # noqa
-        self.site_domain = cast(str, getattr(settings, "SITE_DOMAIN", None))  # noqa
-        self.debug = cast(bool, getattr(settings, "DEBUG_FRAGMENT", False))  # noqa
+        self.debug = cast(bool, settings.IS_DEBUG)
 
         if not all([self.url, self.currency, self.webhook_secret]):
             logger.error("fragment-api не сконфигурирован")
@@ -71,7 +67,7 @@ class FragmentClient:
             "tx_id": str(transaction_id),
             "token": str(self.webhook_secret)
         }
-        return f"{urljoin(self.site_domain, reverse(FRAGMENT_WEBHOOK))}?{urlencode(query)}"
+        return f"{build_site_url(FRAGMENT_WEBHOOK)}?{urlencode(query)}"
 
     async def check_is_enough_currency_for_stars(
             self,
@@ -270,7 +266,7 @@ class FragmentClient:
         и `FragmentAPITooManyRequests`.
 
         Returns:
-            тело заказа, либо `None`, если заказ не найден (404) или включён `DEBUG_FRAGMENT`
+            тело заказа, либо `None`, если заказ не найден (404) или APP_ENV=debug
         """
         if self.debug:
             return None
