@@ -1,6 +1,8 @@
 """Проверки решения о статусе для опроса заказов Fragment."""
 
+import pytest
 from datetime import timedelta
+from uuid import uuid4
 
 from core.domain.enums import TransactionStatus, is_change_status_allowed
 from core.integrations.fragment.enums import FragmentStatus
@@ -57,9 +59,32 @@ def test_waiting_statuses_are_not_final_for_the_user():
     assert TransactionStatus.FAILED not in WAITING_STATUSES
 
 
-if __name__ == "__main__":
-    for name, fn in sorted(globals().items()):
-        if name.startswith("test_") and callable(fn):
-            fn()
-            print(f"ok  {name}")
-    print("all fragment poll checks passed")
+
+@pytest.mark.django_db
+def test_poller_advances_stuck_order_on_every_run_in_one_process(monkeypatch):
+    from unittest.mock import AsyncMock, MagicMock
+    from asgiref.sync import async_to_sync
+    import core.ioc
+    import core.services.redis_service as redis_service
+    import core.tasks.periodic.fragment_orders as poller
+    from core.models import FragmentTransaction, TelegramUser, Transaction
+
+    user = TelegramUser.objects.create(telegram_id=1, username="buyer")
+    txn = Transaction.objects.create(
+        id=uuid4(), telegram_user=user, amount_fiat=100, amount_stars=50, status=TransactionStatus.SEND_CREATED
+    )
+    fragment_id = uuid4()
+    FragmentTransaction.objects.create(fragment_id=fragment_id, id_from_payment_api=txn.id, status=FragmentStatus.CREATED)
+
+    client = MagicMock(get_order=AsyncMock(return_value={"status": FragmentStatus.COMPLETED}))
+    monkeypatch.setattr(core.ioc, "get_container", lambda: MagicMock(get=AsyncMock(return_value=client)))
+    monkeypatch.setattr(redis_service, "redis_client", MagicMock(exists=MagicMock(return_value=0)))
+    monkeypatch.setattr(redis_service, "sync_acquire_lock", MagicMock(return_value=MagicMock()))
+    pushed = MagicMock()
+    monkeypatch.setattr(poller, "push_fragment_status", pushed)
+
+    for _ in range(2):
+        _ = async_to_sync(poller._poll_unfinished_fragment_orders)()  # pyright: ignore[reportPrivateUsage]
+
+    assert pushed.call_count == 2
+    pushed.assert_called_with(txn.id, fragment_id, FragmentStatus.COMPLETED, str(TransactionStatus.SUCCESS))
