@@ -290,7 +290,22 @@ async def _mass_send(
     return await _mass_send_text(bot, broadcast_name, users_qs, text, reply_markup)
 
 
+_running_broadcasts: set[int] = set()
+
+
 async def process_broadcast(bot: Bot, broadcast_id: int) -> None:
+    if broadcast_id in _running_broadcasts:
+        logger.warning(f"Broadcast {broadcast_id} is already running, duplicate start ignored")
+        return
+
+    _running_broadcasts.add(broadcast_id)
+    try:
+        await _process_broadcast(bot, broadcast_id)
+    finally:
+        _running_broadcasts.discard(broadcast_id)
+
+
+async def _process_broadcast(bot: Bot, broadcast_id: int) -> None:
     broadcast = await Broadcast.objects.aget(id=broadcast_id)
 
     broadcast_name = f'"{broadcast.name}"'
