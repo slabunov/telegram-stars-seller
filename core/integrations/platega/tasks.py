@@ -336,9 +336,12 @@ async def send_stars_workflow(
 
     except Exception as exc:
         create_task_save_error_to_db(str(exc))
+        failed_status = (
+            TransactionStatus.IN_DOUBT if isinstance(exc, FragmentAPIUnknownResultError) else TransactionStatus.FAILED
+        )
         _ = sync_save_status_by_key(
             ServicesNames.FRAGMENT, transaction_id,
-            TransactionStatus.FAILED
+            failed_status
         )
         _ = update_transaction_status_task.apply_async(
             args=(str(transaction_id), parsed_payload, payment_method),

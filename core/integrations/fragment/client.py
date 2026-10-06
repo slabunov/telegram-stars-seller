@@ -394,6 +394,11 @@ class FragmentClient:
             response_data = cast(SendStarsResponse, response.json())
             return response_data
 
+        if response.status_code >= 500:
+            err_msg = f"fragment-api ответил {response.status_code} на отправку звёзд: заказ мог быть создан"
+            logger.error(f"{err_msg}; {response.text = }")
+            raise FragmentAPIUnknownResultError(err_msg)
+
         logger.error(f"Не удалось отправить звёзды: {response.status_code = } - {response.text = }")
         raise FragmentAPIError(f"Не удалось отправить звёзды: {response.status_code = } - {response.text = }")
 
@@ -422,14 +427,15 @@ class FragmentClient:
             logger.exception(err_msg)
             raise FragmentAPINetworkError(err_msg) from exc
 
-        except httpx.TimeoutException as exc:
-            err_msg = "Превышено время ожидания при обращении к fragment-api"
-            logger.exception(err_msg)
-            raise FragmentAPIError(err_msg) from exc
-
         except httpx.HTTPError as exc:
-            err_msg = f"Ошибка HTTP во время обращения к fragment-api: {exc}"
+            is_timeout = isinstance(exc, httpx.TimeoutException)
+            err_msg = (
+                "Превышено время ожидания при обращении к fragment-api" if is_timeout
+                else f"Ошибка HTTP во время обращения к fragment-api: {exc}"
+            )
             logger.exception(err_msg)
+            if method == "POST":
+                raise FragmentAPIUnknownResultError(err_msg) from exc
             raise FragmentAPIError(err_msg) from exc
 
         if response.status_code in [401, 403]:

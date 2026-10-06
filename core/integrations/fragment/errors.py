@@ -9,6 +9,10 @@ class FragmentAPINetworkError(FragmentAPIError):
     """Ошибка сети, когда запрос точно НЕ был отправлен."""
 
 
+class FragmentAPIUnknownResultError(FragmentAPIError):
+    """Запрос на изменение был отправлен, но ответа нет (тайм-аут, 5xx)."""
+
+
 @final
 class FragmentAPITooManyRequests(Exception):
     """Ошибка для HTTP со статусом 429."""
