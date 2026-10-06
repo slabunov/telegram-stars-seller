@@ -13,6 +13,6 @@ COPY . .
 
 RUN mkdir -p /app/data
 
-RUN python manage.py collectstatic --noinput
+RUN --mount=type=secret,id=dotenv,target=/app/.env python manage.py collectstatic --noinput
 
 # TODO: перенести рабочую директорию из root в обычную; запускать всё приложение без root прав
