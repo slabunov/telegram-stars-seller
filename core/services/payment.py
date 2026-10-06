@@ -1,34 +1,23 @@
-import json
 import logging
 from decimal import Decimal
 from typing import final, overload
 
 from core.domain.enums import FINAL_MSG_STATUSES
+from core.domain.schemas.payment import PaymentPayloadDict, PaymentRequest
 from core.dto.payment import PaymentDTO, PaymentMethodDTO
-
 from core.integrations.fragment.client import FragmentClient
 from core.integrations.fragment.schemas import SendStarsResponse
-from core.integrations.paypear.client import PayPearClient
-from core.integrations.platega.client import PlategaClient
-from core.integrations.platega.schemas import PaymentPayloadDict
-
+from core.models import PaymentMethod, PromoCode, Transaction, TARGET_SELF
+from core.repositories.payment import PaymentRepository
 from core.repositories.transaction import TransactionRepository
 from core.repositories.user import UserRepository
-from core.repositories.payment import PaymentRepository
 from core.repositories.utils import db_action_with_tenacity
-
+from core.services.payment_providers import PaymentProviderRegistry, UnknownPaymentProviderError
 from core.services.star_price import StarService
 from core.services.user import UnregisteredUser
 
-from core.models import PaymentMethod, PromoCode, Transaction, TARGET_SELF
-
-
 logger = logging.getLogger(__name__)
 audit_logger = logging.getLogger("payment_audit")
-
-
-def _method_order_rank(api_name: str) -> int:
-    return 0 if "paypear" in api_name.lower() else 1
 
 
 class NoUsernameError(Exception):
@@ -47,16 +36,14 @@ class PaymentService:
             user_repo: UserRepository,
             payment_repo: PaymentRepository,
             star_service: StarService,
-            platega_client: PlategaClient,
-            paypear_client: PayPearClient,
+            payment_providers: PaymentProviderRegistry,
             fragment_client: FragmentClient
     ):
         self._trans_repo = trans_repo
         self._user_repo = user_repo
         self._payment_repo = payment_repo
         self._star_service = star_service
-        self._platega_client = platega_client
-        self._paypear_client = paypear_client
+        self._payment_providers = payment_providers
         self._fragment_client = fragment_client
 
     async def ensure_no_maintenance_mode(self) -> None:
@@ -64,10 +51,17 @@ class PaymentService:
             raise MaintenanceModeException("maintenance_mode on True")
 
     async def get_active_payment_methods(self) -> tuple[PaymentMethodDTO, ...]:
-        methods = sorted(
-            await self._payment_repo.get_many_by(),
-            key=lambda method: _method_order_rank(method.api.name)
-        )
+        prioritized: list[tuple[int, PaymentMethod]] = []
+        for method in await self._payment_repo.get_many_by():
+            try:
+                priority = self._payment_providers.get(method.api.name).display_priority
+            except UnknownPaymentProviderError as exc:
+                logger.error(f"Active payment method {method.name!r} is hidden: {exc}")
+                continue
+            prioritized.append((priority, method))
+
+        prioritized.sort(key=lambda pair: pair[0])
+        methods = [method for _, method in prioritized]
         return tuple(
             PaymentMethodDTO(
                 api_name=method.api.name,
@@ -78,18 +72,18 @@ class PaymentService:
             for method in methods
         )
 
-    async def get_payment_method(self, method_api: str, external_method_id: int | str) -> PaymentMethod | None:
+    async def get_payment_method(self, method_api: str, external_method_id: str) -> PaymentMethod | None:
         return await self._payment_repo.get_payment_method_by(method_api, external_method_id, is_check_is_active=False)
 
     async def create_payment(
             self,
             user_id: int, message_id: int,
-            price: Decimal, stars_count: int, payment_api: str, method: int | str,
+            price: Decimal, stars_count: int, payment_api: str, method: str,
             target_username: str = "",
             promo: PromoCode | None = None
     ) -> tuple[PaymentDTO, PaymentPayloadDict]:
         """
-        Обращается к внешнему API для создания платежа и получении ссылки на оплату, потом сохраняет транзакцию в БД.
+        Создаёт платёж через провайдера `payment_api` и получает ссылку на оплату. Транзакцию сохраняется в БД .
 
         Возвращает PaymentDTO:
 
@@ -112,17 +106,17 @@ class PaymentService:
 
         - `stars_count` - int, кол-во звёзд для перевода.
 
-        - `payment_api` - str, API для создания платежа.
+        - `payment_api` - str, `PaymentAPI.name`; по нему выбирается провайдер из `PaymentProviderRegistry`.
 
-        - `method` - int | str, идентификатор метода оплаты во внешнем API (`PaymentMethod.external_id`).
-        Для "Platega" это int (2 - СБП, 11 - Карточный эквайринг, 12 - Международный эквайринг, 13 - Криптовалюта),
-        для "PayPear" - строковый `type` из ЛК (`sbp`, `card`, ...).
+        - `method` - str, `PaymentMethod.external_id` как есть; провайдер сам проверяет и приводит его.
         В данный момент поддерживается только RUB.
 
         - `target_username` - str, по умолчанию "", если указан, то этому человеку будет сделан перевод звёзд.
 
         - `promo` - PromoCode | None, по умолчанию `None`, использованный промокод.
         """
+
+        provider = self._payment_providers.get(payment_api)
 
         user_buyer = await db_action_with_tenacity(
             self._user_repo.get_by_telegram_id, user_id
@@ -162,34 +156,16 @@ class PaymentService:
             payload["promo_name"] = promo.name
             payload["promo_discount"] = str(promo.discount)
 
-        api_lower = payment_api.lower()
-
-        if "platega" in api_lower:
-            username = user_buyer.username
-            if not username:
-                if not target_username:
-                    raise NoUsernameError("Для перевода должен быть username у покупателя или у получателя")
-                username = f"отсутствует, но это подарок для {target_username}"
-
-            payment_dto = await self._platega_client.create_payment(
-                int(method),
-                float(price), "RUB",
-                description,
-                str(user_id),
-                username,
-                payload=json.dumps(payload, ensure_ascii=False)
+        payment_dto = await provider.create_payment(
+            method,
+            PaymentRequest(
+                amount=price,
+                currency="RUB",
+                description=description,
+                buyer_username=user_buyer.username,
+                payload=payload
             )
-
-        elif "paypear" in api_lower:
-            payment_dto = await self._paypear_client.create_payment(
-                str(method),
-                float(price), "RUB",
-                description,
-                payload
-            )
-
-        else:
-            raise NotImplementedError(f"Payment API '{payment_api}' is not supported")
+        )
 
         return payment_dto, payload
 
