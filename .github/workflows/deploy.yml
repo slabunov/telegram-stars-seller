@@ -5,6 +5,10 @@ on:
     branches:
       - main
 
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -66,10 +70,12 @@ jobs:
               exit 1
             fi
 
-            docker compose up -d --build
+            docker compose build
 
-            sleep 5
+            docker compose run --rm --no-deps web python manage.py migrate --noinput
 
-            docker compose exec -T web python manage.py migrate
+            docker compose up -d --remove-orphans --wait --wait-timeout 180
+
+            docker image prune -f
 
             echo "Деплой успешно завершен"

@@ -49,6 +49,7 @@ services:
   celery_worker:
     image: telegram-stars-seller:latest
     command: celery -A config worker --loglevel=info
+    stop_grace_period: 120s
     env_file:
       - .env
     volumes:
