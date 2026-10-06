@@ -1,30 +1,30 @@
-import asyncio
-import json
 import logging
-from uuid import UUID
-from random import randint
-from typing import cast
-
 from django.conf import settings
-from django.utils.crypto import constant_time_compare
-from django.views.decorators.csrf import csrf_exempt
 from django.contrib.auth.models import User
 from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.utils.crypto import constant_time_compare
+from django.views.decorators.csrf import csrf_exempt
+from typing import cast
+from uuid import UUID
 
 from core.integrations.fragment.schemas import SendStarsResponse
 from core.integrations.fragment.tasks import update_fragment_tx_task
+from core.integrations.paypear.client import PayPearClient
+from core.integrations.paypear.errors import PayPearAPIError
+from core.integrations.paypear.schemas import parse_paypear_metadata
 from core.integrations.platega.tasks import update_transaction_status_task
 from core.integrations.webhook_utils import (
     ServicesNames,
     access_granted_or_http_response,
     parse_request,
+    release_fragment_idempotency_key,
     transform_into_internal_status_or_keep_original
 )
+from core.ioc import get_container
 from core.services.redis_service import (
     async_save_status_by_key, get_lock_latest_status,
     async_acquire_lock
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ async def _process_webhook(request: HttpRequest, service_name: ServicesNames) ->
         payment_method = str(platega_data["paymentMethod"])
 
     elif service_name == ServicesNames.PAYPEAR:
-        paypear_data, parsed_payload = parse_request(request, service_name)
+        paypear_data, _ = parse_request(request, service_name)
         paypear_object = paypear_data.get("object", {})
 
         # На наш webhook_url PayPear шлёт только события платежей; возвраты/выплаты
@@ -66,9 +66,28 @@ async def _process_webhook(request: HttpRequest, service_name: ServicesNames) ->
             logger.warning(f"PayPear webhook: shop_id mismatch (got {shop_id})")
             return HttpResponse(status=403)
 
-        transaction_id = paypear_object.get("order_id")
+        transaction_id = str(paypear_object.get("order_id", ""))
+        try:
+            _ = UUID(transaction_id)
+        except ValueError:
+            logger.warning(f"PayPear webhook: invalid order_id {transaction_id!r}")
+            return HttpResponse(status=400)
+
+        # Берём статус и metadata из API PayPear по нашему order_id
+        paypear_client = await get_container().get(PayPearClient)
+        try:
+            payment = await paypear_client.get_verified_payment(transaction_id, paypear_object)
+        except PayPearAPIError as exc:
+            logger.warning(f"PayPear webhook: cannot verify payment {transaction_id}, asking for retry: {exc}")
+            return HttpResponse(status=503)
+
+        if payment is None or str(payment.get("order_id", "")) != transaction_id:
+            logger.warning(f"PayPear webhook: payment {transaction_id} is unknown to PayPear API")
+            return HttpResponse(status=404)
+
+        parsed_payload = parse_paypear_metadata(payment.get("metadata"))
         new_status = transform_into_internal_status_or_keep_original(
-            paypear_object.get("status", ""),
+            payment.get("status", ""),
             service_name
         )
 

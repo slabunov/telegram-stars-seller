@@ -1,17 +1,16 @@
 import asyncio
 import httpx
 import logging
-from decimal import Decimal
-from uuid import UUID, uuid4
-from urllib.parse import urljoin
-from datetime import datetime, timedelta, timezone
-from typing import cast, final, NoReturn
 from collections.abc import Mapping
-
-from django.urls import reverse
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from django.conf import settings
+from typing import cast, final, NoReturn
+from urllib.parse import urljoin
+from uuid import uuid4
 
 from core.domain.network_utils import SAFE_TO_RETRY
+from core.domain.schemas.payment import PaymentPayloadDict
 from core.dto.payment import PaymentDTO
 from core.integrations.paypear.errors import PayPearAPIError, PayPearAPINetworkError
 from core.integrations.paypear.schemas import (
@@ -20,9 +19,7 @@ from core.integrations.paypear.schemas import (
     PayPearPaymentResponseJSON,
     build_paypear_metadata,
 )
-from core.integrations.platega.schemas import PaymentPayloadDict
-from core.integrations.utils import create_new_timeout_conf_or_use_default
-
+from core.integrations.utils import build_site_url, create_new_timeout_conf_or_use_default
 
 logger = logging.getLogger(__name__)
 
@@ -47,22 +44,17 @@ class PayPearClient:
     ORDER_INFO_PATH = "payment/order/{order_id}/"
 
     def __init__(self, client: httpx.Client) -> None:
-        self.url = cast(str, getattr(settings, "PAYPEAR_API_URL", None))  # noqa
-        self.shop_id = cast(str, getattr(settings, "PAYPEAR_SHOP_ID", None))  # noqa
-        self.secret = cast(str, getattr(settings, "PAYPEAR_SECRET", None))  # noqa
-        self.site_domain = cast(str, getattr(settings, "SITE_DOMAIN", None))  # noqa
-        self.return_url = cast(str, getattr(settings, "CHANNEL_LINK", None)) or self.site_domain  # noqa
-        self.debug = cast(bool, getattr(settings, "DEBUG_PAYPEAR", False))  # noqa
-        self.use_webhook = cast(bool, getattr(settings, "PAYPEAR_USE_WEBHOOK", True))  # noqa
-
-        if not all([self.url, self.shop_id, self.secret, self.site_domain]):
-            logger.error("PayPearClient не сконфигурирован.")
-            raise ValueError("PayPearClient is not configured properly")
+        self.url = cast(str, settings.PAYPEAR_API_URL)
+        self.shop_id = cast(str, settings.PAYPEAR_SHOP_ID)
+        self.secret = cast(str, settings.PAYPEAR_SECRET)
+        self.return_url = cast(str, settings.TELEGRAM_CHANNEL_LINK) or cast(str, settings.SITE_DOMAIN)
+        self.debug = cast(bool, settings.IS_DEBUG)
 
         self._client = client
 
-    def build_webhook_url(self) -> str:
-        return urljoin(self.site_domain, reverse(PAYPEAR_WEBHOOK))
+    @staticmethod
+    def build_webhook_url() -> str:
+        return build_site_url(PAYPEAR_WEBHOOK)
 
     async def create_payment(
             self,
@@ -76,11 +68,7 @@ class PayPearClient:
             connect: float | None = None
     ) -> PaymentDTO:
         """
-        Создаёт платёж в PayPear. `order_id` (он же будущий ID транзакции) генерируем сами и
-        отдаём обратно в `PaymentDTO.transaction_id`.
-
-        `method_type` - значение `payment_method_data.type` из ЛК PayPear (`sbp`, `card`, ...),
-        хранится в `PaymentMethod.external_id`.
+        Создаёт платёж в PayPear.
         """
         order_id = uuid4()
 
@@ -110,12 +98,11 @@ class PayPearClient:
             "description": description[:128],
             "metadata": build_paypear_metadata(payload),
             "expires_at": expires_at.isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+            "webhook_url": self.build_webhook_url(),
         }
-        if self.use_webhook:
-            data["webhook_url"] = self.build_webhook_url()
 
-        response = await self._make_request(
-            "POST", self.CREATE_PAYMENT_PATH, str(order_id), data,
+        response = await self._request(
+            "POST", self.CREATE_PAYMENT_PATH, data, idempotence_key=str(order_id),
             timeout=timeout, connect=connect
         )
 
@@ -138,41 +125,41 @@ class PayPearClient:
 
         _raise_for_error(response, data)
 
-    async def get_payment_info(
+    async def get_verified_payment(
             self,
-            order_id: UUID | str,
+            order_id: str,
+            webhook_object: PayPearPaymentObjectJSON,
             *,
-            timeout: float | None = None,
-            connect: float | None = None
+            timeout: float | None = 10.0,
+            connect: float | None = 5.0
     ) -> PayPearPaymentObjectJSON | None:
         """
-        Актуальное состояние платежа по нашему `order_id`.
+        Платёж по нашему `order_id` из API PayPear.
 
-        Используется задачей опроса `poll_pending_paypear_payments_task`, когда webhook-и
-        отключены, а также годится как способ проверки неподписанных вебхуков PayPear.
+        Returns:
+            объект платежа или `None`, если PayPear такой платёж не знает (404)
         """
         if self.debug:
-            return None
+            return webhook_object
 
         path = self.ORDER_INFO_PATH.format(order_id=order_id)
-        response = await self._make_request("GET", path, str(order_id), timeout=timeout, connect=connect)
+        response = await self._request("GET", path, timeout=timeout, connect=connect)
 
         if response.status_code == 200:
-            response_data = cast(PayPearPaymentResponseJSON, response.json())
-            return extract_payment_object(response_data)
+            return extract_payment_object(cast(PayPearPaymentResponseJSON, response.json()))
 
         if response.status_code == 404:
             return None
 
-        _raise_for_error(response, {"order_id": str(order_id)})
+        _raise_for_error(response, {"order_id": order_id})
 
-    async def _make_request(
+    async def _request(
             self,
             method: str,
             path: str,
-            idempotence_key: str,
             data: Mapping[str, object] | None = None,
             *,
+            idempotence_key: str | None = None,
             timeout: float | None = None,
             connect: float | None = None
     ) -> httpx.Response:
@@ -185,7 +172,7 @@ class PayPearClient:
                 return self._client.post(
                     full_url,
                     json=data, auth=auth, timeout=timeout_conf,
-                    headers={"Idempotence-Key": idempotence_key, "Content-Type": "application/json"},
+                    headers={"Idempotence-Key": idempotence_key or "", "Content-Type": "application/json"},
                 )
 
             return self._client.get(full_url, auth=auth, timeout=timeout_conf)
