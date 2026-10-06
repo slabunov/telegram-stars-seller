@@ -177,28 +177,6 @@ async def fragment_webhook(request: HttpRequest) -> HttpResponse:
     return await _process_webhook(request, ServicesNames.FRAGMENT)
 
 
-running_webhooks: set[int] = set()
-
-
-@csrf_exempt
-async def test_webhook(request: HttpRequest) -> HttpResponse:
-    webhook_id = randint(1, 2)
-    if webhook_id in running_webhooks:
-        print(f"test_webhook {webhook_id} is already running")
-        return HttpResponse(status=200)
-
-    print(f"test_webhook {webhook_id} called!")
-
-    print(f"awaiting 5s for {webhook_id}")
-    await asyncio.sleep(5)
-    print(f"awaited for {webhook_id}")
-
-    headers = dict(request.headers)
-    print(json.dumps(headers, indent=2))
-
-    return HttpResponse(status=200)
-
-
 @csrf_exempt
 async def health(_: HttpRequest) -> HttpResponse:
     try:
