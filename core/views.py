@@ -34,6 +34,16 @@ async def _process_webhook(request: HttpRequest, service_name: ServicesNames) ->
     if http_response is not None:
         return http_response
 
+    response: HttpResponse | None = None
+    try:
+        response = await _handle_webhook(request, service_name)
+        return response
+    finally:
+        if service_name == ServicesNames.FRAGMENT and (response is None or response.status_code != 200):
+            await release_fragment_idempotency_key(request)
+
+
+async def _handle_webhook(request: HttpRequest, service_name: ServicesNames) -> HttpResponse:
     parsed_payload = None
     payment_method: str = ""
 
