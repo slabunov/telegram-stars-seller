@@ -9,9 +9,13 @@ https://docs.djangoproject.com/en/6.0/topics/settings/
 For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
+import environ
 import os
 from pathlib import Path
-import environ
+
+from config.env import (
+    normalize_base_url, parse_app_env, require_non_empty, select_telegram_token
+)
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -24,11 +28,9 @@ CLEANUPS_LOG_FILE = DATA_DIR / 'cleanups_audit.log'
 
 
 env = environ.Env(
-    DEBUG=(bool, False),
-    DEBUG_FRAGMENT=(bool, False),
-    DEBUG_PLATEGA=(bool, False),
     USE_SSL=(bool, True),
     ALLOWED_HOSTS=(list, []),
+    PAYPEAR_WEBHOOK_IPS=(list, ['158.160.85.101']),
     CELERY_BROKER_URL=(str, 'redis://localhost:6379/0'),
     NOTIFY_ABOUT_ORDERS=(bool, True),
     SUPPORT_URL=(str, 'https://google.com/'),
@@ -37,41 +39,55 @@ env = environ.Env(
 
 environ.Env.read_env(BASE_DIR / '.env')
 
-SECRET_KEY = env('SECRET_KEY')
-DEBUG = env('DEBUG')
-DEBUG_FRAGMENT=env('DEBUG_FRAGMENT')
-DEBUG_PLATEGA=env('DEBUG_PLATEGA')
+APP_ENV = parse_app_env(env('APP_ENV', default=None))
+IS_DEBUG = APP_ENV == 'debug'
+IS_PROD = APP_ENV == 'prod'
+DEBUG = IS_DEBUG
+
+CONFIG_LOG_MESSAGES: list[str] = []
+
+SECRET_KEY = env('DJANGO_SECRET_KEY')
 ALLOWED_HOSTS = env.list('ALLOWED_HOSTS')
-SITE_DOMAIN = env('SITE_DOMAIN')
+SITE_DOMAIN = normalize_base_url('SITE_DOMAIN', env('SITE_DOMAIN'), CONFIG_LOG_MESSAGES, root_only=True)
 FRAGMENT_WEBHOOK_SECRET = env('FRAGMENT_WEBHOOK_SECRET')
 
 CELERY_BROKER_URL = env('CELERY_BROKER_URL')
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 
-TELEGRAM_BOT_TOKEN = env('TELEGRAM_BOT_TOKEN')
-ADMIN_CHAT_ID = env('ADMIN_CHAT_ID', cast=int)
-ADMIN_BROADCAST_TOPIC_ID = env('ADMIN_BROADCAST_TOPIC_ID', cast=int)
-ADMIN_ORDERS_TOPIC_ID = env('ADMIN_ORDERS_TOPIC_ID', cast=int)
+TELEGRAM_BOT_TOKEN = select_telegram_token(APP_ENV, os.environ)
+TELEGRAM_ADMIN_CHAT_ID = env('TELEGRAM_ADMIN_CHAT_ID', cast=int)
+TELEGRAM_ADMIN_BROADCAST_TOPIC_ID = env('TELEGRAM_ADMIN_BROADCAST_TOPIC_ID', cast=int)
+TELEGRAM_ADMIN_ORDERS_TOPIC_ID = env('TELEGRAM_ADMIN_ORDERS_TOPIC_ID', cast=int)
 NOTIFY_ABOUT_ORDERS = env('NOTIFY_ABOUT_ORDERS')
-CHANNEL_ID = env('CHANNEL_ID', cast=int)
-CHANNEL_LINK = env('CHANNEL_LINK')
+TELEGRAM_CHANNEL_ID = env('TELEGRAM_CHANNEL_ID', cast=int)
+TELEGRAM_CHANNEL_LINK = env('TELEGRAM_CHANNEL_LINK')
 
 SUPPORT_URL = env('SUPPORT_URL')
 FEEDBACK_URL = env('FEEDBACK_URL')
 
-FRAGMENT_API_URL = env('FRAGMENT_API_URL')
+FRAGMENT_API_URL = normalize_base_url('FRAGMENT_API_URL', env('FRAGMENT_API_URL'), CONFIG_LOG_MESSAGES)
 FRAGMENT_CURRENCY = env('FRAGMENT_CURRENCY')
+FRAGMENT_POLL_SECONDS = env.int('FRAGMENT_POLL_SECONDS', default=15)
+FRAGMENT_POLL_MAX_AGE_HOURS = env.int('FRAGMENT_POLL_MAX_AGE_HOURS', default=24)
+FRAGMENT_POLL_DOUBT_AFTER_MINUTES = env.int('FRAGMENT_POLL_DOUBT_AFTER_MINUTES', default=30)
 
-PLATEGA_API_URL = env('PLATEGA_API_URL')
-PLATEGA_MERCHANT_ID = env('PLATEGA_MERCHANT_ID')
-PLATEGA_SECRET = env('PLATEGA_SECRET')
+PLATEGA_API_URL = normalize_base_url('PLATEGA_API_URL', env('PLATEGA_API_URL'), CONFIG_LOG_MESSAGES)
+PLATEGA_MERCHANT_ID = require_non_empty('PLATEGA_MERCHANT_ID', env('PLATEGA_MERCHANT_ID'))
+PLATEGA_SECRET = require_non_empty('PLATEGA_SECRET', env('PLATEGA_SECRET'))
+
+PAYPEAR_API_URL = normalize_base_url('PAYPEAR_API_URL', env('PAYPEAR_API_URL'), CONFIG_LOG_MESSAGES)
+PAYPEAR_SHOP_ID = require_non_empty('PAYPEAR_SHOP_ID', env('PAYPEAR_SHOP_ID'))
+PAYPEAR_SECRET = require_non_empty('PAYPEAR_SECRET', env('PAYPEAR_SECRET'))
+PAYPEAR_WEBHOOK_IPS = env.list('PAYPEAR_WEBHOOK_IPS')
 
 USE_SSL = env('USE_SSL')
 
 if USE_SSL:
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
     SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
 
 
 import django_stubs_ext
@@ -80,13 +96,15 @@ django_stubs_ext.monkeypatch()
 
 # Logging
 
+LOG_LEVEL = 'DEBUG' if IS_DEBUG else 'INFO'
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
     'filters': {
         'skip_not_found': {
             '()': 'django.utils.log.CallbackFilter',
-            'callback': lambda record, d=DEBUG: d or ('Not Found:' not in record.getMessage()),
+            'callback': lambda record, d=IS_DEBUG: d or ('Not Found:' not in record.getMessage()),
         },
     },
     'formatters': {
@@ -99,10 +117,14 @@ LOGGING = {
         'payments_file': {'level': 'INFO', 'class': 'logging.FileHandler', 'filename': str(PAYMENTS_LOG_FILE), 'formatter': 'audit_format'},
         'cleanups_file': {'level': 'INFO', 'class': 'logging.FileHandler', 'filename': str(CLEANUPS_LOG_FILE), 'formatter': 'audit_format'},
     },
-    'root': {'handlers': ['console'], 'level': 'INFO'},
+    'root': {'handlers': ['console'], 'level': LOG_LEVEL},
     'loggers': {
         'django': {'handlers': ['django_console'], 'level': 'INFO', 'propagate': False},
         'httpx': {'handlers': ['console'], 'level': 'WARNING'},
+        'httpcore': {'level': 'WARNING'},
+        'telegram': {'level': 'INFO'},
+        'asyncio': {'level': 'INFO'},
+        'celery': {'level': 'INFO'},
         'payment_audit': {'handlers': ['payments_file'], 'level': 'INFO', 'propagate': False},
         'cleanup_audit': {'handlers': ['cleanups_file'], 'level': 'INFO', 'propagate': False},
     },

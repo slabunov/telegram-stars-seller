@@ -1,15 +1,10 @@
-import os
-import socket
 import asyncio
+import socket
 import warnings
-from concurrent.futures import ThreadPoolExecutor
-# from pathlib import Path
-from typing import final, override
 from collections.abc import Awaitable
-
+from concurrent.futures import ThreadPoolExecutor
 from django.conf import settings
 from django.core.management.base import BaseCommand
-
 from telegram import Update, BotCommand
 from telegram.ext import (
     ApplicationBuilder,
@@ -19,15 +14,15 @@ from telegram.ext import (
 )
 from telegram.request import HTTPXRequest
 from telegram.warnings import PTBUserWarning
+from typing import final, override
 
 from bot.handlers.error import error_handler
 from bot.middlewares.chat import enforce_private_chats_only_or_admin_chat, track_chat_member_update
 from bot.middlewares.user import register_user_middleware
 from bot.router import get_conversation_handler, get_debug_handlers
 from bot.utils.type_aliases import DefaultApplication
-
-from core.services.redis_service import close_async_redis_client, listen_redis_for_broadcasts
 from core.ioc import close_container
+from core.services.redis_service import close_async_redis_client, listen_redis_for_broadcasts
 
 
 @final
@@ -45,13 +40,13 @@ class Command(BaseCommand):
             (socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1),
             (socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 10),  # Пинг после 10 сек простоя (больше 10 из-за beget нельзя)
             (socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 3),  # Интервал повтора пинга
-            (socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)  # Кол-во попыток
+            (socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)     # Кол-во попыток
         ]
     )
 
     async def post_init(self, application: DefaultApplication) -> None:
         commands = [BotCommand("start", "Сделать новый заказ")]
-        if settings.DEBUG:  # pyright: ignore[reportAny]
+        if settings.IS_DEBUG:  # pyright: ignore[reportAny]
             user_warning = "Режим отладки - если ты обычный пользователь, сообщи об ошибке в тех. поддержку"
             commands.append(BotCommand("balance", user_warning))
             commands.append(BotCommand("balance_debug", user_warning))
@@ -105,11 +100,6 @@ class Command(BaseCommand):
 
         self.stdout.write("Бот запускается...")
 
-        token = os.getenv("TELEGRAM_BOT_TOKEN")
-        if not token:
-            self.stderr.write("Ошибка: TELEGRAM_BOT_TOKEN не найден в .env")
-            return
-
         # data_dir = Path(settings.BASE_DIR) / "bot" / "data"
         # data_dir.mkdir(parents=True, exist_ok=True)
         # filepath = data_dir / "bot_persistence.pickle"
@@ -125,7 +115,7 @@ class Command(BaseCommand):
         # .persistence(persistence) TODO: продумать персистентность
         application = (
             ApplicationBuilder()  # pyright: ignore[reportUnknownMemberType]
-            .token(token)
+            .token(settings.TELEGRAM_BOT_TOKEN)  # pyright: ignore[reportAny]
             .request(self.request_config)
             .post_init(self.post_init)
             .post_stop(self.post_stop)
@@ -143,7 +133,7 @@ class Command(BaseCommand):
         application.add_handler(ChatMemberHandler(track_chat_member_update), group=-1)  # noqa
         application.add_handler(get_conversation_handler())
 
-        if settings.DEBUG:  # pyright: ignore[reportAny]
+        if settings.IS_DEBUG:  # pyright: ignore[reportAny]
             handlers = get_debug_handlers()
             for handler in handlers:
                 application.add_handler(handler)

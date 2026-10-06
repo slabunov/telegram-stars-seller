@@ -1,21 +1,20 @@
 import asyncio
 import httpx
-import re
 import logging
-from decimal import Decimal
-from uuid import UUID, uuid4
-from urllib.parse import urljoin
-from typing import cast, final
+import re
 from collections.abc import Mapping
-
+from decimal import Decimal
 from django.conf import settings
+from typing import cast, final
+from urllib.parse import urljoin
+from uuid import UUID, uuid4
 
 from core.domain.network_utils import SAFE_TO_RETRY
 from core.dto.payment import PaymentDTO
 from core.integrations.platega.errors import PlategaAPIError, PlategaAPINetworkError
-from core.integrations.platega.schemas import PaymentRequestJSON, PaymentRequestMetadataJSON, TransactionCreationResponse
+from core.integrations.platega.schemas import PaymentRequestJSON, PaymentRequestMetadataJSON, \
+    TransactionCreationResponse
 from core.integrations.utils import create_new_timeout_conf_or_use_default
-
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +34,7 @@ class PlategaClient:
         self.url = cast(str, getattr(settings, "PLATEGA_API_URL", None))  # noqa
         self.merchant_id = cast(str, getattr(settings, "PLATEGA_MERCHANT_ID", None))  # noqa
         self.secret = cast(str, getattr(settings, "PLATEGA_SECRET", None))  # noqa
-        self.debug = cast(bool, getattr(settings, "DEBUG_PLATEGA", False))  # noqa
+        self.debug = cast(bool, settings.IS_DEBUG)
 
         if not all([self.url, self.merchant_id, self.secret]):
             logger.error("PlategaClient не сконфигурирован.")

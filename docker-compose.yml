@@ -1,6 +1,9 @@
 services:
   web:
-    build: .
+    build:
+      context: .
+      secrets:
+        - dotenv
     image: telegram-stars-seller:latest
     command: gunicorn config.asgi:application --bind 0.0.0.0:8000 -k uvicorn.workers.UvicornWorker --workers 2
     ports:
@@ -46,6 +49,7 @@ services:
   celery_worker:
     image: telegram-stars-seller:latest
     command: celery -A config worker --loglevel=info
+    stop_grace_period: 120s
     env_file:
       - .env
     volumes:
@@ -73,3 +77,7 @@ volumes:
   sqlite_data:
   persistence_pickle:
   redis_data:
+
+secrets:
+  dotenv:
+    file: .env

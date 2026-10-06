@@ -1,23 +1,19 @@
 import asyncio
 import logging
-from mimetypes import guess_type
-from io import BufferedReader
-from typing import TypedDict, NotRequired
-
 from django.conf import settings
 from django.db.models import QuerySet
-
+from io import BufferedReader
+from mimetypes import guess_type
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.error import BadRequest, Forbidden
-
 from tenacity import retry
+from typing import TypedDict, NotRequired
 
 from core.domain.tenacity_utils import TelegramRetryConfig
 from core.domain.type_aliases import AsyncCallable
-from core.repositories.utils import db_action_or_exception_with_tenacity, db_action_with_tenacity
 from core.models import Broadcast, TelegramUser
-
+from core.repositories.utils import db_action_or_exception_with_tenacity, db_action_with_tenacity
 
 logger = logging.getLogger(__name__)
 
@@ -143,11 +139,11 @@ async def process_preview(bot: Bot, broadcast_id: int) -> None:
     try:
         file_id = await _send_preview_and_get_file_id(
             bot=bot,
-            chat_id=settings.ADMIN_CHAT_ID,  # pyright: ignore[reportAny]
+            chat_id=settings.TELEGRAM_ADMIN_CHAT_ID,  # pyright: ignore[reportAny]
             text=broadcast.text,
             media_path=media_path,
             reply_markup=reply_markup,
-            thread_id=settings.ADMIN_BROADCAST_TOPIC_ID  # pyright: ignore[reportAny]
+            thread_id=settings.TELEGRAM_ADMIN_BROADCAST_TOPIC_ID  # pyright: ignore[reportAny]
         )
 
         broadcast.telegram_file_id = file_id
@@ -294,7 +290,22 @@ async def _mass_send(
     return await _mass_send_text(bot, broadcast_name, users_qs, text, reply_markup)
 
 
+_running_broadcasts: set[int] = set()
+
+
 async def process_broadcast(bot: Bot, broadcast_id: int) -> None:
+    if broadcast_id in _running_broadcasts:
+        logger.warning(f"Broadcast {broadcast_id} is already running, duplicate start ignored")
+        return
+
+    _running_broadcasts.add(broadcast_id)
+    try:
+        await _process_broadcast(bot, broadcast_id)
+    finally:
+        _running_broadcasts.discard(broadcast_id)
+
+
+async def _process_broadcast(bot: Bot, broadcast_id: int) -> None:
     broadcast = await Broadcast.objects.aget(id=broadcast_id)
 
     broadcast_name = f'"{broadcast.name}"'

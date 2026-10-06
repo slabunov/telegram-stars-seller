@@ -46,6 +46,10 @@ async def update_fragment_transaction_workflow(
     if transaction.status == new_status:
         return True, f"fragment transaction {fragment_tx_id} is already {new_status}"
 
+    final_statuses = (FragmentStatus.COMPLETED, FragmentStatus.FAILED)
+    if transaction.status in final_statuses and new_status not in final_statuses:
+        return True, f"fragment transaction {fragment_tx_id} is final ({transaction.status}), ignored {new_status}"
+
     is_changed = await safe_set_status_for_fragment_tx_id_with_retries(
         celery_task, started_at, kwargs, timeout,
         fragment_tx_id, new_status

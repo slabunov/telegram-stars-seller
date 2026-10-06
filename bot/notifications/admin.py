@@ -1,24 +1,18 @@
 from decimal import Decimal
-from uuid import UUID
-from typing import overload
-
 from dishka import FromDishka
-
 from django.conf import settings
-
 from telegram import Bot, Message
 from telegram.constants import ParseMode
-
 from tenacity import retry
+from typing import overload
+from uuid import UUID
 
 from bot.renderers.order import get_promo_and_price_sentences
-
 from core.domain.tenacity_utils import TelegramRetryConfig
-from core.repositories.utils import db_action_or_exception_with_tenacity
-from core.services.payment import PaymentService
 from core.ioc import inject
 from core.models import PaymentMethod, PromoCode
-
+from core.repositories.utils import db_action_or_exception_with_tenacity
+from core.services.payment import PaymentService
 
 _retry_config = TelegramRetryConfig().asdict
 
@@ -26,7 +20,7 @@ _retry_config = TelegramRetryConfig().asdict
 @retry(**_retry_config)
 async def _notify(bot: Bot, message_thread_id: int | None, text: str) -> Message:
     return await bot.send_message(
-        chat_id=settings.ADMIN_CHAT_ID, message_thread_id=message_thread_id,  # pyright: ignore[reportAny]
+        chat_id=settings.TELEGRAM_ADMIN_CHAT_ID, message_thread_id=message_thread_id,  # pyright: ignore[reportAny]
         text=text, parse_mode=ParseMode.HTML
     )
 
@@ -34,7 +28,7 @@ async def _notify(bot: Bot, message_thread_id: int | None, text: str) -> Message
 @overload
 async def notify_admin_about_order_creation(  # noqa  # pyright: ignore[reportInconsistentOverload]
         bot: Bot,
-        amount_stars: int, price: Decimal, method_api: str, external_method_id: int,
+        amount_stars: int, price: Decimal, method_api: str, external_method_id: str,
         buyer_username: str, target_username: str,
         active_promo: PromoCode | None,
         transaction_id: UUID | str
@@ -43,7 +37,7 @@ async def notify_admin_about_order_creation(  # noqa  # pyright: ignore[reportIn
 @inject
 async def notify_admin_about_order_creation(
         bot: Bot,
-        amount_stars: int, price: Decimal, method_api: str, external_method_id: int,
+        amount_stars: int, price: Decimal, method_api: str, external_method_id: str,
         buyer_username: str, target_username: str,
         active_promo: PromoCode | None,
         transaction_id: UUID | str,
@@ -88,4 +82,4 @@ async def notify_admin_about_order_creation(
         f"🆔 ID заказа: <code>{transaction_id}</code>\n\n"
     )
 
-    return await _notify(bot, settings.ADMIN_ORDERS_TOPIC_ID, text)  # pyright: ignore[reportAny]
+    return await _notify(bot, settings.TELEGRAM_ADMIN_ORDERS_TOPIC_ID, text)  # pyright: ignore[reportAny]

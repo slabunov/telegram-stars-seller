@@ -124,6 +124,9 @@ class Transaction(models.Model):
     class Meta:
         verbose_name = "Транзакция"
         verbose_name_plural = "Транзакции"
+        indexes = [
+            models.Index(fields=["status", "created_at"], name="transaction_status_created"),
+        ]
 
 
 @final
@@ -235,6 +238,9 @@ class FragmentTransaction(models.Model):
     class Meta:
         verbose_name = "Транзакция Fragment"
         verbose_name_plural = "Транзакции Fragment"
+        indexes = [
+            models.Index(fields=["id_from_payment_api"], name="fragment_tx_payment_id"),
+        ]
 
 
 @final

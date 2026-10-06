@@ -1,32 +1,28 @@
-from functools import wraps
-from typing import Literal
-
 from django.conf import settings
-
+from functools import wraps
 from telegram import ChatMember, Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes
 from telegram.constants import ChatMemberStatus
 from telegram.error import Forbidden, TelegramError
-
+from telegram.ext import ContextTypes
 from tenacity import retry
+from typing import Literal
 
-from bot.renderers.base import delete_message, send_new_message
-from bot.utils.active_conversation import autosave_active_conversation
-from bot.utils.type_aliases import UpdateWithContextHandler
 from bot.callbacks import SubscriptionCallback, create_callback
 from bot.context import get_view_context
 from bot.enums import BackDestination
+from bot.renderers.base import delete_message, send_new_message
 from bot.states import BotConversationState
-
+from bot.utils.active_conversation import autosave_active_conversation
+from bot.utils.type_aliases import UpdateWithContextHandler
 from core.domain.tenacity_utils import TelegramRetryConfig
-
 
 _retry_config = TelegramRetryConfig().asdict
 
 
 @retry(**_retry_config)
 async def get_chat_member(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> ChatMember:
-    return await context.bot.get_chat_member(chat_id=settings.CHANNEL_ID, user_id=user_id)  # pyright: ignore[reportAny]
+    return await context.bot.get_chat_member(chat_id=settings.TELEGRAM_CHANNEL_ID,
+                                             user_id=user_id)  # pyright: ignore[reportAny]
 
 
 async def is_user_subscribed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -60,7 +56,7 @@ def require_subscription(back_destination: BackDestination, /):
 
             keyboard = [
                 [InlineKeyboardButton(
-                    "🔮 Перейти в канал", url=settings.CHANNEL_LINK  # pyright: ignore[reportAny]
+                    "🔮 Перейти в канал", url=settings.TELEGRAM_CHANNEL_LINK  # pyright: ignore[reportAny]
                 )],
                 [InlineKeyboardButton(
                     "✅ Я подписался(-ась)",

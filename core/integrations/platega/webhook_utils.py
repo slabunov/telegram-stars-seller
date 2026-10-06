@@ -1,23 +1,21 @@
 from __future__ import annotations
 
-import random
 import logging
-from uuid import UUID
-from decimal import Decimal
-from typing import cast, overload, TypeVar, ParamSpec
+import random
 from collections.abc import Awaitable
-
+from decimal import Decimal
 from dishka import FromDishka
-
 from telegram import InputMediaPhoto, Message
-from telegram.ext import ExtBot
 from telegram.error import BadRequest, NetworkError, RetryAfter, TimedOut
+from telegram.ext import ExtBot
+from typing import cast, overload, TypeVar, ParamSpec
+from uuid import UUID
 
 from bot.renderers.base import create_media_source
 from bot.renderers.webhook import get_message_parts_for_status
-
 from core.domain.enums import TransactionStatus
 from core.domain.network_utils import SAFE_TO_RETRY, RetriesEntity, get_timeout_error_or_none
+from core.domain.schemas.payment import PaymentPayloadDict
 from core.integrations.fragment.enums import FragmentStatus
 from core.integrations.fragment.errors import (
     FragmentAPINetworkError,
@@ -26,15 +24,13 @@ from core.integrations.fragment.errors import (
     FragmentAPITooManyRequests
 )
 from core.integrations.fragment.schemas import SendStarsResponse
-from core.integrations.platega.schemas import PaymentPayloadDict
+from core.ioc import inject
+from core.models import Transaction
 from core.repositories.utils import safe_db_action_async_with_retries_celery
 from core.services.payment import PaymentService
 from core.services.support import SupportService
 from core.services.transaction import TransactionService
 from core.tasks import Task
-from core.ioc import inject
-from core.models import Transaction
-
 
 logger = logging.getLogger(__name__)
 

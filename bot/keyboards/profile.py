@@ -1,6 +1,6 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-from bot.callbacks import BackCallback, ProfileMenuCallback, HistoryPageCallback, create_callback
+from bot.callbacks import BackCallback, HistoryPageCallback, ProfileMenuCallback, create_callback
 from bot.enums import BackDestination, ProfileAction
 
 

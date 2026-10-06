@@ -1,23 +1,21 @@
-import re
 import logging
-from decimal import Decimal
+import re
 from datetime import datetime, timedelta
-from math import ceil
-from typing import Literal, cast, overload
-
+from decimal import Decimal
 from dishka import FromDishka
-
+from django.conf import settings
 from httpx import ConnectTimeout, ReadTimeout
-
+from math import ceil
 from telegram import Update, Message
 from telegram.ext import ContextTypes, ConversationHandler
+from typing import Literal, cast, overload
 
-from django.conf import settings
-
+from bot.callbacks import PaymentMethodCallback, RecipientModeCallback, FixedQuantityCallback, manage_callback_data
+from bot.context import get_view_context
+from bot.enums import BackDestination, RecipientMode
 from bot.handlers.start import running_users
-
 from bot.keyboards.error import KeyboardMethodError
-
+from bot.notifications.admin import notify_admin_about_order_creation
 from bot.renderers.base import delete_message
 from bot.renderers.main import send_empty_username_alert
 from bot.renderers.order import (
@@ -33,27 +31,25 @@ from bot.renderers.order import (
     show_user_not_found,
     show_order_confirmation, edit_order_created_message, edit_order_creating_message
 )
-
-from bot.notifications.admin import notify_admin_about_order_creation
+from bot.states import BotConversationState
 from bot.utils.active_conversation import ensure_use_active_conversation_with_callback
 from bot.utils.channel_subscription import require_subscription
-from bot.callbacks import PaymentMethodCallback, RecipientModeCallback, FixedQuantityCallback, manage_callback_data
-from bot.context import get_view_context
-from bot.enums import BackDestination, RecipientMode
-from bot.states import BotConversationState
-
 from core.integrations.fragment.client import FragmentClient
 from core.integrations.utils import retries_with_tenacity
+from core.ioc import inject
 from core.repositories.utils import db_action_with_tenacity, db_action_or_exception_with_tenacity
 from core.services.payment import PaymentService
+from core.services.payment_providers import InvalidPaymentMethodError
 from core.services.promo_code import PromoCodeService
+from core.services.redis_service import async_acquire_lock, get_lock_order_confirm
 from core.services.support import SupportService
 from core.services.transaction import TransactionService
 from core.services.user import UserService
-from core.ioc import inject
-
 
 logger = logging.getLogger(__name__)
+
+ORDER_CONFIRM_BUSY_MESSAGE = "Заказ уже создаётся, подожди немного…"
+_ORDER_CONFIRM_LOCK_TTL = 180.0
 
 
 @ensure_use_active_conversation_with_callback
@@ -362,11 +358,6 @@ async def _handle_order_confirmed_helper(
     except ValueError:
         raise KeyboardMethodError("Цена должна быть в формате Decimal")
 
-    try:
-        external_method_id = int(external_method_id)
-    except ValueError:
-        raise KeyboardMethodError("Внешний ID метода оплаты должен быть целым числом для используемого API")
-
     active_promo = await db_action_with_tenacity(
         promo_service.get_active_promo_for_telegram_user_id, update.effective_user.id
     )
@@ -392,6 +383,9 @@ async def _handle_order_confirmed_helper(
             target_username=ctx.order.target_username,
             promo=active_promo
         )
+
+    except InvalidPaymentMethodError as err:
+        raise KeyboardMethodError(str(err)) from err
 
     except (ConnectTimeout, ReadTimeout):
         _ = await update.callback_query.answer(
@@ -475,9 +469,31 @@ async def _handle_order_confirmed_helper(
         return BotConversationState.ORDER_CONFIRMATION
 
 
+async def _create_order_once(
+        update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> Literal[BotConversationState.ORDER_CONFIRMATION, BotConversationState.ORDER_CONFIRMED]:
+    """Пропускает только одно создание заказа на пользователя за раз"""
+    lock = await async_acquire_lock(
+        get_lock_order_confirm(update.effective_user.id),
+        timeout=_ORDER_CONFIRM_LOCK_TTL, blocking=False, blocking_timeout=0.0
+    )
+    if lock is None:
+        _ = await update.callback_query.answer(text=ORDER_CONFIRM_BUSY_MESSAGE, show_alert=True)
+        return BotConversationState.ORDER_CONFIRMATION
+
+    _ = await update.callback_query.answer()
+    try:
+        return await _handle_order_confirmed_helper(update, context)
+    finally:
+        try:
+            await lock.release()
+        except Exception as exc:
+            logger.warning(f"Не удалось освободить замок создания заказа: {exc}")
+
+
 @ensure_use_active_conversation_with_callback
 @require_subscription(BackDestination.ORDER_CONFIRMATION)
 async def handle_order_confirmed(
         update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> Literal[BotConversationState.ORDER_CONFIRMATION, BotConversationState.ORDER_CONFIRMED]:
-    return await _handle_order_confirmed_helper(update, context)
+    return await _create_order_once(update, context)

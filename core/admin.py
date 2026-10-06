@@ -1,16 +1,14 @@
 import json
-from decimal import Decimal
-from typing import final, override, cast
 from collections.abc import Mapping
-
+from decimal import Decimal
 from django import forms
 from django.conf import settings
 from django.contrib import admin, messages
-from django.http import HttpRequest, HttpResponseRedirect
 from django.db.models import Sum
 from django.db.models.functions import TruncMonth
-
+from django.http import HttpRequest, HttpResponseRedirect
 from solo.admin import SingletonModelAdmin
+from typing import final, override, cast
 
 from core.forms import BroadcastForm
 from core.models import (
@@ -121,7 +119,7 @@ class TelegramUserAdmin(admin.ModelAdmin):  # pyright: ignore[reportMissingTypeA
         ("created_at", admin.DateFieldListFilter), ("updated_at", admin.DateFieldListFilter),
         ("promo_since", admin.DateFieldListFilter), "is_active"
     )
-    if settings.DEBUG:  # pyright: ignore[reportAny]
+    if settings.IS_DEBUG:  # pyright: ignore[reportAny]
         readonly_fields = ("promo_since", "created_at", "updated_at")
     else:
         readonly_fields = (
@@ -170,9 +168,9 @@ class TransactionAdmin(admin.ModelAdmin, TransactionMetadataMixin):  # pyright: 
         ("expires_at", admin.DateFieldListFilter)
     )
     search_fields = (
-        "telegram_user__username", "telegram_user__telegram_id", "metadata_info__promo_name"
+        "id", "telegram_user__username", "telegram_user__telegram_id", "metadata_info__promo_name"
     )
-    search_help_text = "Поиск по имени пользователя или ID и имени промокода"
+    search_help_text = "Поиск по ID транзакции, имени пользователя или ID и имени промокода"
     readonly_fields = ("created_at", "expires_at", "updated_at")
     readonly_fields_when_created = ("id",)
     inlines = [TransactionMetadataInline]
