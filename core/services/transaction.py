@@ -1,17 +1,16 @@
 import logging
-from uuid import UUID
-from decimal import Decimal
-from datetime import datetime, timedelta
-from typing import final
 from collections.abc import Mapping
+from datetime import datetime, timedelta
+from decimal import Decimal
+from typing import final
+from uuid import UUID
 
 from core.domain.enums import TransactionStatus
-from core.integrations.platega.schemas import PaymentPayloadDict
+from core.domain.schemas.payment import PaymentPayloadDict
+from core.models import Transaction
 from core.repositories.transaction import TransactionRepository
 from core.repositories.user import UserRepository
 from core.services.user import UnregisteredUser
-from core.models import Transaction
-
 
 logger = logging.getLogger(__name__)
 

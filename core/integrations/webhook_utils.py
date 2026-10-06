@@ -1,21 +1,20 @@
 import json
 import logging
-from enum import StrEnum
-from typing import cast, overload, Literal
-
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse
 from django.utils.crypto import constant_time_compare
+from enum import StrEnum
+from typing import cast, overload, Literal
 
 from core.domain.enums import TransactionStatus
+from core.domain.schemas.payment import PaymentPayloadDict, PaymentPayloadValidateModel
 from core.integrations.fragment.enums import FragmentStatus
 from core.integrations.fragment.schemas import SendStarsResponse
 from core.integrations.paypear.enums import PayPearStatus
 from core.integrations.paypear.schemas import PayPearWebhookRequestJSON, parse_paypear_metadata
 from core.integrations.platega.enums import PlategaStatus
-from core.integrations.platega.schemas import PaymentPayloadValidateModel, PlategaWebhookRequestJSON, PaymentPayloadDict
+from core.integrations.platega.schemas import PlategaWebhookRequestJSON
 from core.services.redis_service import get_async_redis_client, get_key_fragment_idem
-
 
 logger = logging.getLogger(__name__)
 
@@ -43,14 +42,22 @@ async def validate_fragment_idempotency_key(request: HttpRequest) -> HttpRespons
     idem_key = request.headers.get("X-Idempotency-Key")
 
     if idem_key:
-        async_redis_client = get_async_redis_client()
-        key = get_key_fragment_idem(idem_key)
-        is_new = await async_redis_client.setnx(key, "1")
+        is_new = await get_async_redis_client().set(get_key_fragment_idem(idem_key), "1", ex=172800, nx=True)  # 48 часов
         if not is_new:
             return HttpResponse(status=200)
-        _ = await async_redis_client.expire(key, 172800)  # 48 часов
 
     return None
+
+
+async def release_fragment_idempotency_key(request: HttpRequest) -> None:
+    idem_key = request.headers.get("X-Idempotency-Key")
+    if not idem_key:
+        return
+
+    try:
+        _ = await get_async_redis_client().delete(get_key_fragment_idem(idem_key))
+    except Exception as exc:
+        logger.warning(f"Fragment webhook: failed to release idempotency key: {exc}")
 
 
 def is_platega_authenticated(request: HttpRequest) -> bool:
@@ -76,10 +83,6 @@ def get_client_ip(request: HttpRequest) -> str:
 
 
 def is_paypear_authenticated(request: HttpRequest) -> bool:
-    """
-    У PayPear нет заголовков аутентификации и задокументированного алгоритма подписи - только
-    список IP-адресов, с которых приходят уведомления (плюс сверка shop_id и перечитывание статуса).
-    """
     allowed_ips = cast(list[str], getattr(settings, "PAYPEAR_WEBHOOK_IPS", []))
     if not allowed_ips:
         return False

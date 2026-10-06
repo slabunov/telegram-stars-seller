@@ -1,19 +1,17 @@
 from __future__ import annotations
 
-import time
 import logging
-from uuid import UUID
-from typing import cast, ParamSpec, TypeVar
-
-from celery import shared_task
-
+import time
 from asgiref.sync import async_to_sync
-
+from celery import shared_task
 from telegram.constants import ParseMode
+from typing import cast, ParamSpec, TypeVar
+from uuid import UUID
 
 from core.domain.enums import TransactionStatus, is_change_status_allowed
+from core.domain.schemas.payment import PaymentPayloadDict
+from core.integrations.fragment.errors import FragmentAPIUnknownResultError
 from core.integrations.fragment.tasks import update_fragment_tx_task
-from core.integrations.platega.schemas import PaymentPayloadDict
 from core.integrations.platega.webhook_utils import (
     safe_create_transaction_with_retries,
     safe_get_transaction_with_retries,
@@ -33,7 +31,6 @@ from core.services.redis_service import (
     get_and_del_by_key, sync_save_status_by_key,
 )
 from core.tasks import Task
-
 
 logger = logging.getLogger(__name__)
 cleanup_logger = logging.getLogger("cleanup_audit")

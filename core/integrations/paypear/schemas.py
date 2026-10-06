@@ -1,9 +1,7 @@
-from uuid import UUID
 from typing import NotRequired, TypedDict, Annotated, cast
+from uuid import UUID
 
-# PaymentPayloadDict / PaymentPayloadValidateModel живут в platega.schemas и являются
-# общими для всех платёжных интеграций.
-from core.integrations.platega.schemas import PaymentPayloadDict, PaymentPayloadValidateModel
+from core.domain.schemas.payment import PaymentPayloadDict, PaymentPayloadValidateModel
 
 
 class PayPearAmountJSON(TypedDict):
@@ -27,7 +25,7 @@ class PayPearPaymentRequestJSON(TypedDict):
     payment_method_data: PayPearPaymentMethodDataJSON
     description: str
     metadata: dict[str, str]
-    webhook_url: NotRequired[str]
+    webhook_url: str
     expires_at: NotRequired[str]
 
 
@@ -61,7 +59,6 @@ class PayPearErrorJSON(TypedDict):
 
 class PayPearPaymentResponseJSON(TypedDict):
     success: bool
-    # В документации ключ называется то "result", то "response" - обрабатываем оба.
     result: NotRequired[PayPearPaymentObjectJSON]
     response: NotRequired[PayPearPaymentObjectJSON]
     error: NotRequired[PayPearErrorJSON]
@@ -73,12 +70,6 @@ class PayPearWebhookRequestJSON(TypedDict):
     object: PayPearPaymentObjectJSON
     signature: str
 
-
-# Проброс контекста заказа через metadata платежа.
-# У Platega для этого есть строковый "payload"; у PayPear - "metadata" (строковые
-# пары "ключ-значение", максимум 16 ключей, значение не длиннее 512 символов).
-# Наш PaymentPayloadDict имеет 10 коротких полей, раскладываем его в metadata и
-# собираем обратно из вебхука.
 
 _PAYLOAD_INT_KEYS = frozenset(("user_id", "message_id", "stars_count"))
 _PAYLOAD_NULLABLE_INT_KEYS = frozenset(("promo_id",))

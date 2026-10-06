@@ -1,22 +1,22 @@
 import httpx
-from typing import final
 from collections.abc import Callable, Iterable, Awaitable
-
 from dishka import AsyncContainer, Provider, Scope, provide, make_async_container
 from dishka.integrations.base import wrap_injection
+from typing import final
 
 from core.integrations.fragment.client import FragmentClient, TIMEOUT as FRAGMENT_TIMEOUT, LIMITS as FRAGMENT_LIMITS
 from core.integrations.paypear.client import PayPearClient, TIMEOUT as PAYPEAR_TIMEOUT, LIMITS as PAYPEAR_LIMITS
+from core.integrations.paypear.provider import PayPearPaymentProvider
 from core.integrations.platega.client import PlategaClient, TIMEOUT as PLATEGA_TIMEOUT, LIMITS as PLATEGA_LIMITS
-
+from core.integrations.platega.provider import PlategaPaymentProvider
 from core.repositories.fragment_transaction import FragmentTransactionRepository
 from core.repositories.payment import PaymentRepository
 from core.repositories.promo_code import PromoCodeRepository
 from core.repositories.transaction import TransactionRepository
 from core.repositories.user import UserRepository
-
 from core.services.fragment_transaction import FragmentTransactionService
 from core.services.payment import PaymentService
+from core.services.payment_providers import PaymentProviderRegistry
 from core.services.promo_code import PromoCodeService
 from core.services.star_price import StarService
 from core.services.stats import StatsService
@@ -53,6 +53,14 @@ class BusinessLogicProvider(Provider):
         with httpx.Client(timeout=PAYPEAR_TIMEOUT, limits=PAYPEAR_LIMITS) as client:
             yield PayPearClient(client)
             # Код после yield выполняется при вызове container.close()
+
+    @provide(scope=Scope.APP)
+    def payment_providers(self, platega_client: PlategaClient,
+                          paypear_client: PayPearClient) -> PaymentProviderRegistry:
+        return PaymentProviderRegistry(
+            PayPearPaymentProvider(paypear_client),
+            PlategaPaymentProvider(platega_client),
+        )
 
     @provide(scope=Scope.APP)
     def fragment_client(self, fragment_tx_service: FragmentTransactionService) -> Iterable[FragmentClient]:

@@ -1,34 +1,5 @@
-from dataclasses import dataclass
-from decimal import Decimal
-from uuid import UUID
 from typing import NotRequired, TypedDict, Annotated
-
-
-class PaymentPayloadDict(TypedDict):
-    user_id: int
-    message_id: int
-    price: float
-    stars_count: int
-    target_username: str
-    payment_api: str
-    pay_url: str
-    promo_id: int | None
-    promo_name: str
-    promo_discount: Annotated[str, Decimal] | None
-
-
-@dataclass(frozen=True, slots=True)
-class PaymentPayloadValidateModel:
-    user_id: int
-    message_id: int
-    price: float
-    stars_count: int
-    target_username: str
-    payment_api: str
-    pay_url: str
-    promo_id: int | None
-    promo_name: str
-    promo_discount: Annotated[str, Decimal] | None
+from uuid import UUID
 
 
 class PaymentRequestDetailsJSON(TypedDict):
