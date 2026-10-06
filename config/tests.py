@@ -170,7 +170,7 @@ def test_debug_env_settings_and_startup_log():
     assert _startup_messages(result.stderr) == [
         "Application environment: debug",
         "Django debug mode enabled.",
-        "Telegram bot configuration: debug",
+        # "Telegram bot configuration: debug",
         "Added trailing slash to FRAGMENT_API_URL.",
     ]
     assert DEBUG_TOKEN not in result.stderr
@@ -191,7 +191,7 @@ def test_prod_env_settings_and_startup_log():
     ]
     assert _startup_messages(result.stderr) == [
         "Application environment: prod",
-        "Telegram bot configuration: prod",
+        # "Telegram bot configuration: prod",
         "Added trailing slash to SITE_DOMAIN.",
     ]
     assert PROD_TOKEN not in result.stderr

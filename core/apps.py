@@ -16,7 +16,7 @@ class CoreConfig(AppConfig):
         logger.info(f"Application environment: {settings.APP_ENV}")
         if settings.DEBUG:  # pyright: ignore[reportAny]
             logger.info("Django debug mode enabled.")
-        logger.info(f"Telegram bot configuration: {settings.APP_ENV}")
+        # logger.info(f"Telegram bot configuration: {settings.APP_ENV}")
         for message in settings.CONFIG_LOG_MESSAGES:  # pyright: ignore[reportAny]
             logger.info(message)
 
