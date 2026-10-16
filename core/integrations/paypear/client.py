@@ -19,7 +19,12 @@ from core.integrations.paypear.schemas import (
     PayPearPaymentResponseJSON,
     build_paypear_metadata,
 )
-from core.integrations.utils import build_site_url, create_new_timeout_conf_or_use_default
+from core.integrations.utils import (
+    DEFAULT_EXPIRES_IN,
+    build_site_url,
+    create_new_timeout_conf_or_use_default,
+    format_expires_in,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +35,6 @@ LIMITS = httpx.Limits(max_keepalive_connections=10, keepalive_expiry=15.0)
 
 PAYPEAR_WEBHOOK = "paypear_webhook"
 
-DEFAULT_EXPIRES_IN = "00:30:00"
 _PAYMENT_LIFETIME = timedelta(minutes=30)
 
 
@@ -120,7 +124,7 @@ class PayPearClient:
                 transaction_id=order_id,
                 pay_url=pay_url,
                 price=_parse_amount(payment_object, fallback=amount),
-                expires_in=_parse_expires_in(payment_object, fallback=expires_at)
+                expires_in=format_expires_in(payment_object.get("expires_at"), fallback=expires_at)
             )
 
         _raise_for_error(response, data)
@@ -203,30 +207,6 @@ def _parse_amount(payment_object: PayPearPaymentObjectJSON, *, fallback: float) 
         return Decimal(str(value))
     except Exception:
         return Decimal(str(fallback))
-
-
-def _parse_expires_in(payment_object: PayPearPaymentObjectJSON, *, fallback: datetime) -> str:
-    raw = payment_object.get("expires_at")
-    expires_at = fallback
-    if raw:
-        try:
-            expires_at = datetime.fromisoformat(raw)
-        except ValueError:
-            pass
-
-    if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=timezone.utc)
-
-    remaining = expires_at - datetime.now(timezone.utc)
-    total_seconds = int(remaining.total_seconds())
-    # дальше по коду expires_in парсится через strptime("%H:%M:%S"), где %H не принимает >23,
-    # поэтому за пределами суток отдаём безопасное значение по умолчанию
-    if total_seconds <= 0 or total_seconds >= 24 * 3600:
-        return DEFAULT_EXPIRES_IN
-
-    hours, rem = divmod(total_seconds, 3600)
-    minutes, seconds = divmod(rem, 60)
-    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
 
 def _raise_for_error(response: httpx.Response, request_data: Mapping[str, object]) -> NoReturn:

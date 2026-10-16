@@ -1,36 +1,31 @@
 import logging
 import traceback
-from pickle import UnpicklingError
-from typing import overload
-
-from httpx import ConnectError
-
 from dishka import FromDishka
-
+from httpx import ConnectError
+from pickle import UnpicklingError
 from telegram import Update
 from telegram.error import NetworkError
 from telegram.ext import ContextTypes, InvalidCallbackData
+from typing import overload
 
-from general.utils import json_dumps
-
+from bot.context import get_view_context
 from bot.keyboards.error import KeyboardMethodError
 from bot.keyboards.support import build_support_kb
 from bot.renderers.base import delete_message, send_new_message
-from bot.context import get_view_context
-
 from core.integrations.fragment.errors import (
     FragmentAPIError,
     FragmentAPINotEnoughBalanceError,
     FragmentAPITemporaryError,
     FragmentAPITooManyRequests
 )
+from core.integrations.payhot.errors import PayHotAPIError
 from core.integrations.paypear.errors import PayPearAPIError
 from core.integrations.platega.errors import PlategaAPIError
+from core.ioc import inject
 from core.services.payment import MaintenanceModeException, NoUsernameError
 from core.services.redis_service import DecodingRedisDataError
 from core.services.support import SupportService
-from core.ioc import inject
-
+from general.utils import json_dumps
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +68,7 @@ async def error_handler(
     support_url = await support_service.get_support_url()
     reply_markup = await build_support_kb(support_url)
 
-    if isinstance(error, (FragmentAPIError, PlategaAPIError, PayPearAPIError)):
+    if isinstance(error, (FragmentAPIError, PlategaAPIError, PayPearAPIError, PayHotAPIError)):
         text = (
             "❌ <b>Произошла ошибка!</b>\n\n"
             "Попробуй последнее действие снова или вернись назад, если есть возможность. Либо начинай новый заказ "

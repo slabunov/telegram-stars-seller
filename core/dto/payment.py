@@ -20,6 +20,7 @@ class PaymentDTO:
     pay_url: str | None
     price: Decimal
     expires_in: str
+    provider_payment_id: str | None = None
 
 
 class PricingDTO(NamedTuple):

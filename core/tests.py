@@ -1,7 +1,10 @@
 """Вебхуки платёжных провайдеров и Fragment callback URL."""
 import asyncio
+import hashlib
+import hmac
 import json
 import pytest
+import time
 from django.test import RequestFactory
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
@@ -16,6 +19,7 @@ from core.integrations.platega.client import PlategaClient
 from core.integrations.webhook_utils import ServicesNames
 
 PAYPEAR_IP = "158.160.85.101"
+PAYHOT_SECRET = "whsec_test"
 
 
 def _payload(payment_api: str) -> PaymentPayloadDict:
@@ -39,6 +43,7 @@ def pipeline(monkeypatch, settings):
     settings.PAYPEAR_WEBHOOK_IPS = [PAYPEAR_IP]
     settings.PLATEGA_MERCHANT_ID = "merchant"
     settings.PLATEGA_SECRET = "platega-secret"
+    settings.PAYHOT_WEBHOOK_SECRET = PAYHOT_SECRET
 
     mocks = MagicMock()
     mocks.lock = _Lock()
@@ -94,6 +99,53 @@ def test_paypear_concurrent_duplicate_is_rejected_for_retry(pipeline):
 def test_paypear_webhook_for_another_shop_is_forbidden(pipeline):
     response = asyncio.run(views.paypear_webhook(_paypear_request(uuid4(), shop_id=7)))
     assert response.status_code == 403
+    pipeline.task.apply_async.assert_not_called()
+
+
+def _payhot_request(
+        transaction_id: UUID, status: str = "succeeded", event_type: str = "payment.succeeded",
+        secret: str = PAYHOT_SECRET, timestamp: int | None = None
+):
+    body = json.dumps({
+        "api_version": "v2", "event_id": str(uuid4()), "event_type": event_type, "occurred_at": "2026-10-05T05:00:00Z",
+        "data": {"id": str(uuid4()), "object": "payment", "status": status,
+                 "merchant_order_reference": str(transaction_id),
+                 "amount_minor": "34990", "currency": "RUB", "payment_method": "sbp"},
+    }).encode()
+    t = str(int(time.time()) if timestamp is None else timestamp)
+    signature = hmac.new(secret.encode(), f"{t}.".encode() + body, hashlib.sha256).hexdigest()
+    return RequestFactory().post(
+        "/core/webhooks/payhot/", data=body, content_type="application/json",
+        headers={"PayHot-Signature": f"t={t},v2={signature}"},
+    )
+
+
+def test_payhot_signed_succeeded_webhook_moves_transaction_to_processing(pipeline):
+    transaction_id = uuid4()
+
+    response = asyncio.run(views.payhot_webhook(_payhot_request(transaction_id)))
+
+    assert response.status_code == 200
+    pipeline.save.assert_awaited_once_with(ServicesNames.PAYHOT, transaction_id, str(TransactionStatus.PROCESSING))
+    pipeline.task.apply_async.assert_called_once_with(args=(str(transaction_id), None, ""), kwargs={"started_at": None})
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"secret": "wrong"}, {"timestamp": int(time.time()) - 301},
+], ids=["forged-signature", "expired-signature"])
+def test_payhot_webhook_with_bad_signature_is_rejected(pipeline, kwargs):
+    response = asyncio.run(views.payhot_webhook(_payhot_request(uuid4(), **kwargs)))
+
+    assert response.status_code == 401
+    pipeline.save.assert_not_awaited()
+    pipeline.task.apply_async.assert_not_called()
+
+
+def test_payhot_sandbox_event_does_not_pay_for_order(pipeline):
+    response = asyncio.run(views.payhot_webhook(_payhot_request(uuid4(), event_type="sandbox.payment.succeeded")))
+
+    assert response.status_code == 200
+    pipeline.save.assert_not_awaited()
     pipeline.task.apply_async.assert_not_called()
 
 

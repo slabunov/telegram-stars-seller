@@ -103,6 +103,22 @@ async def _handle_webhook(request: HttpRequest, service_name: ServicesNames) -> 
 
         payment_method = ""
 
+    elif service_name == ServicesNames.PAYHOT:
+        payhot_data = parse_request(request, service_name)
+
+        event_type = payhot_data.get("event_type", "")
+        if not event_type.startswith("payment."):
+            return HttpResponse(status=200)
+
+        payhot_payment = payhot_data.get("data", {})
+        transaction_id = str(payhot_payment.get("merchant_order_reference", ""))
+        new_status = transform_into_internal_status_or_keep_original(
+            payhot_payment.get("status", ""),
+            service_name
+        )
+
+        payment_method = ""
+
     elif service_name == ServicesNames.FRAGMENT:
         fragment_data: SendStarsResponse = parse_request(request, service_name)
         fragment_tx_id = fragment_data.get("id", None)
@@ -170,6 +186,12 @@ async def payment_webhook(request: HttpRequest) -> HttpResponse:
 async def paypear_webhook(request: HttpRequest) -> HttpResponse:
     """Уведомления PayPear об изменении статуса платежа."""
     return await _process_webhook(request, ServicesNames.PAYPEAR)
+
+
+@csrf_exempt
+async def payhot_webhook(request: HttpRequest) -> HttpResponse:
+    """Подписанные уведомления PayHot об изменении статуса платежа."""
+    return await _process_webhook(request, ServicesNames.PAYHOT)
 
 
 @csrf_exempt

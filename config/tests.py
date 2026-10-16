@@ -123,6 +123,7 @@ _BASE_ENV = {
     "FRAGMENT_API_URL": "https://api.fragment-api.com/v1/", "FRAGMENT_CURRENCY": "TON",
     "PLATEGA_API_URL": "https://app.platega.io/", "PLATEGA_MERCHANT_ID": "m", "PLATEGA_SECRET": "s",
     "PAYPEAR_API_URL": "https://api.paypear.ru/v1/", "PAYPEAR_SHOP_ID": "1", "PAYPEAR_SECRET": "s",
+    "PAYHOT_API_KEY": "k", "PAYHOT_WEBHOOK_SECRET": "s",
     **BOTH,
 }
 
