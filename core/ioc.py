@@ -5,6 +5,8 @@ from dishka.integrations.base import wrap_injection
 from typing import final
 
 from core.integrations.fragment.client import FragmentClient, TIMEOUT as FRAGMENT_TIMEOUT, LIMITS as FRAGMENT_LIMITS
+from core.integrations.payhot.client import PayHotClient, TIMEOUT as PAYHOT_TIMEOUT, LIMITS as PAYHOT_LIMITS
+from core.integrations.payhot.provider import PayHotPaymentProvider
 from core.integrations.paypear.client import PayPearClient, TIMEOUT as PAYPEAR_TIMEOUT, LIMITS as PAYPEAR_LIMITS
 from core.integrations.paypear.provider import PayPearPaymentProvider
 from core.integrations.platega.client import PlategaClient, TIMEOUT as PLATEGA_TIMEOUT, LIMITS as PLATEGA_LIMITS
@@ -55,9 +57,16 @@ class BusinessLogicProvider(Provider):
             # Код после yield выполняется при вызове container.close()
 
     @provide(scope=Scope.APP)
-    def payment_providers(self, platega_client: PlategaClient,
-                          paypear_client: PayPearClient) -> PaymentProviderRegistry:
+    def payhot_client(self) -> Iterable[PayHotClient]:
+        with httpx.Client(timeout=PAYHOT_TIMEOUT, limits=PAYHOT_LIMITS) as client:
+            yield PayHotClient(client)
+            # Код после yield выполняется при вызове container.close()
+
+    @provide(scope=Scope.APP)
+    def payment_providers(self, platega_client: PlategaClient, paypear_client: PayPearClient,
+                          payhot_client: PayHotClient) -> PaymentProviderRegistry:
         return PaymentProviderRegistry(
+            PayHotPaymentProvider(payhot_client),
             PayPearPaymentProvider(paypear_client),
             PlategaPaymentProvider(platega_client),
         )

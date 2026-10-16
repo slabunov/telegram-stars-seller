@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import Callable, Awaitable
+from datetime import datetime, timezone
 from django.conf import settings
 from django.urls import reverse
 from httpx import Timeout
@@ -12,8 +13,11 @@ from core.integrations.fragment.errors import (
     FragmentAPITemporaryError,
     FragmentAPITooManyRequests
 )
+from core.integrations.payhot.errors import PayHotAPINetworkError
 from core.integrations.paypear.errors import PayPearAPINetworkError
 from core.integrations.platega.errors import PlategaAPINetworkError
+
+DEFAULT_EXPIRES_IN = "00:30:00"
 
 
 def build_site_url(view_name: str) -> str:
@@ -48,7 +52,8 @@ async def retries_with_tenacity[**P,R](func: Callable[P,Awaitable[R]], *args: P.
                     FragmentAPITemporaryError,
                     FragmentAPITooManyRequests,
                     PlategaAPINetworkError,
-                    PayPearAPINetworkError
+                    PayPearAPINetworkError,
+                    PayHotAPINetworkError
             )),
             reraise=True
     ):
@@ -64,3 +69,25 @@ async def retries_with_tenacity[**P,R](func: Callable[P,Awaitable[R]], *args: P.
                 raise err
 
     return await func(*args, **kwargs)
+
+
+def format_expires_in(raw: str | None, *, fallback: datetime) -> str:
+    """ISO написание -> в формат HH:MM:SS."""
+    expires_at = fallback
+    if raw:
+        try:
+            expires_at = datetime.fromisoformat(raw)
+        except ValueError:
+            pass
+
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+    remaining = expires_at - datetime.now(timezone.utc)
+    total_seconds = int(remaining.total_seconds())
+    if total_seconds <= 0 or total_seconds >= 24 * 3600:
+        return DEFAULT_EXPIRES_IN
+
+    hours, rem = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(rem, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"

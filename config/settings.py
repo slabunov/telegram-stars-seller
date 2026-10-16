@@ -31,6 +31,7 @@ env = environ.Env(
     USE_SSL=(bool, True),
     ALLOWED_HOSTS=(list, []),
     PAYPEAR_WEBHOOK_IPS=(list, ['158.160.85.101']),
+    PAYHOT_API_URL=(str, 'https://app.pay.hot/api/v2/'),
     CELERY_BROKER_URL=(str, 'redis://localhost:6379/0'),
     NOTIFY_ABOUT_ORDERS=(bool, True),
     SUPPORT_URL=(str, 'https://google.com/'),
@@ -80,6 +81,10 @@ PAYPEAR_API_URL = normalize_base_url('PAYPEAR_API_URL', env('PAYPEAR_API_URL'), 
 PAYPEAR_SHOP_ID = require_non_empty('PAYPEAR_SHOP_ID', env('PAYPEAR_SHOP_ID'))
 PAYPEAR_SECRET = require_non_empty('PAYPEAR_SECRET', env('PAYPEAR_SECRET'))
 PAYPEAR_WEBHOOK_IPS = env.list('PAYPEAR_WEBHOOK_IPS')
+
+PAYHOT_API_URL = normalize_base_url('PAYHOT_API_URL', env('PAYHOT_API_URL'), CONFIG_LOG_MESSAGES)
+PAYHOT_API_KEY = require_non_empty('PAYHOT_API_KEY', env('PAYHOT_API_KEY'))
+PAYHOT_WEBHOOK_SECRET = require_non_empty('PAYHOT_WEBHOOK_SECRET', env('PAYHOT_WEBHOOK_SECRET'))
 
 USE_SSL = env('USE_SSL')
 

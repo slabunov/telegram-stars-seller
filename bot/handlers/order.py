@@ -405,6 +405,10 @@ async def _handle_order_confirmed_helper(
         payment_dto.transaction_id,
         parsed_payload,
         payment_method=f"{method_api} - {external_method_id}",
+                                      payload=(
+                                          {"provider_payment_id": payment_dto.provider_payment_id}
+                                          if payment_dto.provider_payment_id is not None else None
+                                      ),
         expires_in=payment_dto.expires_in
     )
 

@@ -1,5 +1,9 @@
+import hashlib
+import hmac
 import json
 import logging
+import re
+import time
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse
 from django.utils.crypto import constant_time_compare
@@ -10,6 +14,8 @@ from core.domain.enums import TransactionStatus
 from core.domain.schemas.payment import PaymentPayloadDict, PaymentPayloadValidateModel
 from core.integrations.fragment.enums import FragmentStatus
 from core.integrations.fragment.schemas import SendStarsResponse
+from core.integrations.payhot.enums import PayHotStatus
+from core.integrations.payhot.schemas import PayHotWebhookRequestJSON
 from core.integrations.paypear.enums import PayPearStatus
 from core.integrations.paypear.schemas import PayPearWebhookRequestJSON, parse_paypear_metadata
 from core.integrations.platega.enums import PlategaStatus
@@ -22,13 +28,14 @@ logger = logging.getLogger(__name__)
 class ServicesNames(StrEnum):
     PLATEGA = "platega"
     PAYPEAR = "paypear"
+    PAYHOT = "payhot"
     FRAGMENT = "fragment"
     FRAGMENT__FROM_CREATION = "fragment__from_creation"
     FRAGMENT__FROM_WEBHOOK = "fragment__from_webhook"
     FRAGMENT__FROM_POLL = "fragment__from_poll"
 
 
-PAYMENT_SERVICE_NAMES = (ServicesNames.PLATEGA, ServicesNames.PAYPEAR)
+PAYMENT_SERVICE_NAMES = (ServicesNames.PLATEGA, ServicesNames.PAYPEAR, ServicesNames.PAYHOT)
 
 
 def validate_fragment_token(request: HttpRequest) -> HttpResponse | None:
@@ -89,6 +96,25 @@ def is_paypear_authenticated(request: HttpRequest) -> bool:
     return get_client_ip(request) in allowed_ips
 
 
+_PAYHOT_SIGNATURE_RE = re.compile(r"t=([0-9]{1,12}),v2=([a-f0-9]{64})")
+_PAYHOT_SIGNATURE_WILLWAIT_SECONDS = 300
+
+
+def is_payhot_authenticated(request: HttpRequest) -> bool:
+    match = _PAYHOT_SIGNATURE_RE.fullmatch(request.headers.get("PayHot-Signature", ""))
+    if match is None:
+        return False
+
+    timestamp, signature = match.groups()
+    if abs(time.time() - int(timestamp)) > _PAYHOT_SIGNATURE_WILLWAIT_SECONDS:
+        return False
+
+    expected = hmac.new(
+        cast(str, settings.PAYHOT_WEBHOOK_SECRET).encode(), f"{timestamp}.".encode() + request.body, hashlib.sha256
+    ).hexdigest()
+    return constant_time_compare(expected, signature)
+
+
 async def access_granted_or_http_response(request: HttpRequest, webhook_name: ServicesNames) -> HttpResponse | None:
     if request.method != "POST":
         return HttpResponse(status=405)
@@ -100,6 +126,10 @@ async def access_granted_or_http_response(request: HttpRequest, webhook_name: Se
     if webhook_name == ServicesNames.PAYPEAR:
         if not is_paypear_authenticated(request):
             return HttpResponse(status=403)
+
+    if webhook_name == ServicesNames.PAYHOT:
+        if not is_payhot_authenticated(request):
+            return HttpResponse(status=401)
 
     if webhook_name == ServicesNames.FRAGMENT:
         http_response = validate_fragment_token(request)
@@ -144,6 +174,12 @@ def parse_request(
 
 @overload
 def parse_request(
+        request: HttpRequest, service_name: Literal[ServicesNames.PAYHOT]
+) -> PayHotWebhookRequestJSON: ...
+
+
+@overload
+def parse_request(
         request: HttpRequest, service_name: Literal[ServicesNames.PLATEGA]
 ) -> tuple[PlategaWebhookRequestJSON, PaymentPayloadDict | None]: ...
 
@@ -159,6 +195,7 @@ def parse_request(
 ) -> (
         tuple[PlategaWebhookRequestJSON, PaymentPayloadDict | None]
         | tuple[PayPearWebhookRequestJSON, PaymentPayloadDict | None]
+        | PayHotWebhookRequestJSON
         | SendStarsResponse
 ):
     if service_name == ServicesNames.PLATEGA:
@@ -170,6 +207,9 @@ def parse_request(
         paypear_data = cast(PayPearWebhookRequestJSON, json.loads(request.body))
         paypear_payload = parse_paypear_metadata(paypear_data.get("object", {}).get("metadata"))
         return paypear_data, paypear_payload
+
+    if service_name == ServicesNames.PAYHOT:
+        return cast(PayHotWebhookRequestJSON, json.loads(request.body))
 
     if service_name == ServicesNames.FRAGMENT:
         return cast(SendStarsResponse, json.loads(request.body))
@@ -187,6 +227,12 @@ def transform_into_internal_status_or_keep_original(new_status: str, service_nam
     if service_name == ServicesNames.PAYPEAR:
         return (
             PayPearStatus
+            .transform_into_internal_status_or_keep_original(new_status)
+        )
+
+    if service_name == ServicesNames.PAYHOT:
+        return (
+            PayHotStatus
             .transform_into_internal_status_or_keep_original(new_status)
         )
 
