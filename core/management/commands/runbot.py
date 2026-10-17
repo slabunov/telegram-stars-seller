@@ -139,4 +139,6 @@ class Command(BaseCommand):
                 application.add_handler(handler)
 
         self.stdout.write("Бот настроен! Пытаемся подключиться к серверу Telegram...")
-        application.run_polling()
+        application.run_polling(
+            bootstrap_retries=5, # try to survive a few connection errors
+        )
