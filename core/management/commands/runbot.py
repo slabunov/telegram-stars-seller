@@ -56,22 +56,22 @@ class Command(BaseCommand):
 
         loop = asyncio.get_running_loop()
         loop.set_default_executor(ThreadPoolExecutor(max_workers=50))
-        self.stdout.write("Бот: ThreadPoolExecutor расширен до 50 потоков.")
+        self.stdout.write("ThreadPoolExecutor has been expanded to 50 threads.")
 
-        self.stdout.write("Бот: создаём прослушиватель публикаций Redis для рассылок...")
+        self.stdout.write("Creating a Redis publication listener for broadcasts...")
         application.bot_data["stop_redis"] = False
         application.bot_data["broadcast_listener"] = asyncio.create_task(listen_redis_for_broadcasts(application))
-        self.stdout.write("Бот: прослушиватель публикаций Redis для рассылок создан!")
+        self.stdout.write("Created Redis publication listener for broadcasts.")
 
     async def post_stop(self, application: DefaultApplication) -> None:
         self.stdout.write("Bot is stopping...")
 
-        self.stdout.write("Бот: останавливаем прослушиватель публикаций Redis для рассылок...")
+        self.stdout.write("Stopping Redis publication listener for broadcasts...")
         application.bot_data["stop_redis"] = True
         task = application.bot_data.get("broadcast_listener", None)
         if task is not None and isinstance(task, Awaitable):
             await task
-        self.stdout.write("Бот: прослушиватель публикаций Redis для рассылок остановлен!")
+        self.stdout.write("Stopped Redis publication listener for broadcasts!")
 
         self.stdout.write("Closing DI container in bot...")
         try:
@@ -98,7 +98,7 @@ class Command(BaseCommand):
         # для хэндлера
         warnings.filterwarnings("ignore", message=r".*CallbackQueryHandler", category=PTBUserWarning)
 
-        self.stdout.write("Бот запускается...")
+        self.stdout.write("The bot is starting...")
 
         # data_dir = Path(settings.BASE_DIR) / "bot" / "data"
         # data_dir.mkdir(parents=True, exist_ok=True)
@@ -138,7 +138,7 @@ class Command(BaseCommand):
             for handler in handlers:
                 application.add_handler(handler)
 
-        self.stdout.write("Бот настроен! Пытаемся подключиться к серверу Telegram...")
+        self.stdout.write("The bot is set up! Trying to connect to the Telegram...")
         application.run_polling(
             bootstrap_retries=5, # try to survive a few connection errors
         )
